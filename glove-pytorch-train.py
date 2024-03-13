@@ -20,6 +20,7 @@ import shutil
 # import glob
 import signal
 import sys
+import numpy as np
 
 # Constants
 BOS_TOKEN = "<bos>"
@@ -35,16 +36,16 @@ WEIGHT_INIT_RANGE = 0.1
 # context_size = 2
 # batch_size = 1024
 # num_epoch = 10
-embedding_dim = 64
+embedding_dim = 300
 context_size = 8
-batch_size = 128
-num_epoch = 5
+batch_size = 512
+num_epoch = 30
 learning_rate = 0.001
 
 word_separated_txt_path = 'data/temp_training_data' # 1% of the data
 results_path = 'data'
 line_limit_per_document = None #for testing. None for no limit
-use_in_memory = True #False for LMDB
+
 lmdb_map_size = 30*1024*1024*1024 #30GB
 
 # 用以控制样本权重的超参数
@@ -302,18 +303,20 @@ def main():
 
     corpus = load_linesentences(word_separated_txt_path, line_limit_per_document)
 
-    if use_in_memory:
-        dataset = GloveDataset(
+
+    dataset = GloveDataset(
             corpus,
             vocab,
             context_size=context_size
         )
-    else:
-        dataset = GloveDatasetLMDB(
-            corpus,
-            vocab,
-            context_size=context_size
-        )
+
+
+    # dataset = GloveDatasetLMDB(
+    #         corpus,
+    #         vocab,
+    #         context_size=context_size
+    #     )
+   
 
     end_time = perf_counter()
     m, s = divmod(end_time-start_time, 60)
