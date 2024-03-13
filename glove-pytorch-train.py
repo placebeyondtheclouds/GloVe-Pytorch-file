@@ -200,7 +200,6 @@ class GloveDataset(Dataset):
 
 
 
-
 # LMDB version
 class GloveDatasetLMDB(Dataset):
     def __init__(self, corpus_generator, vocab, context_size=2):
@@ -215,7 +214,7 @@ class GloveDatasetLMDB(Dataset):
         
         self.bos = vocab[BOS_TOKEN]
         self.eos = vocab[EOS_TOKEN]
-        with self.env.begin(write=True, buffers=True) as txn:
+        with self.env.begin(write=True) as txn:
             for sentence in tqdm(corpus_generator, desc="Dataset Construction"):
                 sentence = [self.bos] + vocab.convert_tokens_to_ids(sentence) + [self.eos]
                 for i in range(1, len(sentence)-1):
@@ -242,7 +241,7 @@ class GloveDatasetLMDB(Dataset):
         # dump to a new database with consequtive index as a key and (w, c, count) as value
         print('dumping to a list')
         with self.env.begin(write=False) as txn:
-            with self.env_list.begin(write=True, buffers=True) as txn_list:
+            with self.env_list.begin(write=True) as txn_list:
                 for i, (k, v) in tqdm(enumerate(txn.cursor())):
                     k = pickle.loads(k)
                     v = (k[0], k[1], pickle.loads(v))
@@ -250,11 +249,11 @@ class GloveDatasetLMDB(Dataset):
 
 
     def __len__(self):
-        with self.env.begin(write=False, buffers=True) as txn:
+        with self.env.begin(write=False) as txn:
             return txn.stat()['entries']
 
     def __getitem__(self, i):
-        with self.env_list.begin(write=False, buffers=True) as txn_list:
+        with self.env_list.begin(write=False) as txn_list:
             return pickle.loads(txn_list.get(pickle.dumps(i)))
         
 
