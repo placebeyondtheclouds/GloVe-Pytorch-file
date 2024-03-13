@@ -12,3 +12,4 @@ To do:
 
 - add muli-GPU support
 - evaluation code
+- dataset preparation code
