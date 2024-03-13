@@ -45,6 +45,7 @@ word_separated_txt_path = 'data/temp_training_data' # 1% of the data
 results_path = 'data'
 line_limit_per_document = 10 #for testing. default is None
 use_in_memory = True
+lmdb_map_size = 30*1024*1024*1024 #30GB
 
 # 用以控制样本权重的超参数
 m_max = 100
@@ -184,10 +185,13 @@ class GloveDataset(Dataset):
                     self.cooccur_counts[(w, c)] += 1 / (k + 1)
         self.data = [(w, c, count) for (w, c), count in self.cooccur_counts.items()]
         print(f'co-occurence matrix size: {len(self.data)}, memory required: {len(self.data)*3*8/1024/1024} MB')
+    
     def __len__(self):
         return len(self.data)
+    
     def __getitem__(self, i):
         return self.data[i]
+    
     def collate_fn(self, examples):
         words = torch.tensor([ex[0] for ex in examples])
         contexts = torch.tensor([ex[1] for ex in examples])
@@ -206,8 +210,8 @@ class GloveDatasetLMDB(Dataset):
             remove_contents(self.filename)
         if os.path.exists(self.filename_list):
             remove_contents(self.filename_list)
-        self.env = lmdb.open(path=self.filename, map_size=10*1024*1024*1024, map_async=True, writemap=True, readonly=False, lock=False, readahead=False,  meminit=False, create=True)
-        self.env_list = lmdb.open(path=self.filename_list, map_size=10*1024*1024*1024, map_async=True, writemap=True, readonly=False, lock=False, readahead=False, meminit=False, create=True)
+        self.env = lmdb.open(path=self.filename, map_size=lmdb_map_size, map_async=True, writemap=True, readonly=False, lock=False, readahead=False,  meminit=False, create=True)
+        self.env_list = lmdb.open(path=self.filename_list, map_size=lmdb_map_size, map_async=True, writemap=True, readonly=False, lock=False, readahead=False, meminit=False, create=True)
         
         self.bos = vocab[BOS_TOKEN]
         self.eos = vocab[EOS_TOKEN]
