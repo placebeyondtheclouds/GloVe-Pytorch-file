@@ -1,6 +1,6 @@
 
 # import gensim
-from gensim.models.word2vec import PathLineSentences#, LineSentence
+from gensim.models.word2vec import PathLineSentences, LineSentence
 # from multiprocessing import Pool
 from collections import defaultdict
 import torch
@@ -16,6 +16,10 @@ from time import perf_counter
 import os
 import lmdb
 import pickle
+import shutil
+# import glob
+import signal
+import sys
 
 # Constants
 BOS_TOKEN = "<bos>"
@@ -25,7 +29,7 @@ BOW_TOKEN = "<bow>"
 EOW_TOKEN = "<eow>"
 WEIGHT_INIT_RANGE = 0.1
 
-# linesentence_reader_process_number = 16
+# linesentence_reader_process_number = 8
 
 # embedding_dim = 64
 # context_size = 2
@@ -34,16 +38,31 @@ WEIGHT_INIT_RANGE = 0.1
 embedding_dim = 64
 context_size = 8
 batch_size = 128
-num_epoch = 10
+num_epoch = 5
 learning_rate = 0.001
 
 word_separated_txt_path = 'data/temp_training_data' # 1% of the data
 results_path = 'data'
-line_limit_per_document = 2 #for testing. default is None
+line_limit_per_document = 10 #for testing. default is None
+use_in_memory = True
 
 # 用以控制样本权重的超参数
 m_max = 100
 alpha = 0.75
+
+
+def signal_handler(sig, frame):
+    print('You pressed Ctrl+C!')
+    sys.exit(0)
+
+def remove_contents(directory):
+    for filename in tqdm(os.listdir(directory)):
+        file_path = os.path.join(directory, filename)
+        if os.path.isfile(file_path) or os.path.islink(file_path):
+            os.unlink(file_path)  # remove file or symlink
+        elif os.path.isdir(file_path):
+            shutil.rmtree(file_path)  # remove directory
+
 
 # ver1
 def load_linesentences(txt_path, limit=None):
@@ -145,46 +164,50 @@ def read_vocab(path):
 
 
 # the original in-memory version
-# class GloveDataset(Dataset):
-#     def __init__(self, corpus, vocab, context_size=2):
-#         # 记录词与上下文在给定语料中的共现次数
-#         self.cooccur_counts = defaultdict(float)
-#         self.bos = vocab[BOS_TOKEN]
-#         self.eos = vocab[EOS_TOKEN]
-#         for sentence in tqdm(corpus, desc="Dataset Construction"):
-#             # sentence = [self.bos] + sentence + [self.eos]
-#             sentence = [self.bos] + vocab.convert_tokens_to_ids(sentence) + [self.eos]
-#             for i in range(1, len(sentence)-1):
-#                 w = sentence[i]
-#                 left_contexts = sentence[max(0, i - context_size):i]
-#                 right_contexts = sentence[i+1:min(len(sentence), i + context_size)+1]
-#                 # 共现次数随距离衰减: 1/d(w, c)
-#                 for k, c in enumerate(left_contexts[::-1]):
-#                     self.cooccur_counts[(w, c)] += 1 / (k + 1)
-#                 for k, c in enumerate(right_contexts):
-#                     self.cooccur_counts[(w, c)] += 1 / (k + 1)
-#         self.data = [(w, c, count) for (w, c), count in self.cooccur_counts.items()]
-#         print(f'co-occurence matrix size: {len(self.data)}, memory required: {len(self.data) * 3 * 4 / 1024 / 1024} MB')
-#     def __len__(self):
-#         return len(self.data)
-#     def __getitem__(self, i):
-#         return self.data[i]
-#     def collate_fn(self, examples):
-#         words = torch.tensor([ex[0] for ex in examples])
-#         contexts = torch.tensor([ex[1] for ex in examples])
-#         counts = torch.tensor([ex[2] for ex in examples])
-#         return (words, contexts, counts)
+class GloveDataset(Dataset):
+    def __init__(self, corpus, vocab, context_size=2):
+        # 记录词与上下文在给定语料中的共现次数
+        self.cooccur_counts = defaultdict(float)
+        self.bos = vocab[BOS_TOKEN]
+        self.eos = vocab[EOS_TOKEN]
+        for sentence in tqdm(corpus, desc="Dataset Construction"):
+            # sentence = [self.bos] + sentence + [self.eos]
+            sentence = [self.bos] + vocab.convert_tokens_to_ids(sentence) + [self.eos]
+            for i in range(1, len(sentence)-1):
+                w = sentence[i]
+                left_contexts = sentence[max(0, i - context_size):i]
+                right_contexts = sentence[i+1:min(len(sentence), i + context_size)+1]
+                # 共现次数随距离衰减: 1/d(w, c)
+                for k, c in enumerate(left_contexts[::-1]):
+                    self.cooccur_counts[(w, c)] += 1 / (k + 1)
+                for k, c in enumerate(right_contexts):
+                    self.cooccur_counts[(w, c)] += 1 / (k + 1)
+        self.data = [(w, c, count) for (w, c), count in self.cooccur_counts.items()]
+        print(f'co-occurence matrix size: {len(self.data)}, memory required: {len(self.data) * 3 * 4 / 1024 / 1024} MB')
+    def __len__(self):
+        return len(self.data)
+    def __getitem__(self, i):
+        return self.data[i]
+    def collate_fn(self, examples):
+        words = torch.tensor([ex[0] for ex in examples])
+        contexts = torch.tensor([ex[1] for ex in examples])
+        counts = torch.tensor([ex[2] for ex in examples])
+        return (words, contexts, counts)
 
 
 
 
 # LMDB version
-class GloveDataset(Dataset):
+class GloveDatasetLMDB(Dataset):
     def __init__(self, corpus_generator, vocab, context_size=2):
-        self.filename = os.path.join(results_path, 'cooccur_counts.lmdb')
-        self.filename_list = os.path.join(results_path, 'cooccur_counts_list.lmdb')
-        self.env = lmdb.open(path=self.filename, map_size=1*1024*1024*1024, map_async=True, writemap=True, readonly=False, lock=False, create=True)
-        self.env_list = lmdb.open(path=self.filename_list, map_size=1*1024*1024*1024, map_async=True, writemap=True, readonly=False, lock=False, create=True)
+        self.filename = os.path.join(results_path, 'cooccur_counts_lmdb')
+        self.filename_list = os.path.join(results_path, 'cooccur_counts_list_lmdb')
+        if os.path.exists(self.filename):
+            remove_contents(self.filename)
+        if os.path.exists(self.filename_list):
+            remove_contents(self.filename_list)
+        self.env = lmdb.open(path=self.filename, map_size=10*1024*1024*1024, map_async=True, writemap=True, readonly=False, lock=False, readahead=False,  meminit=False, create=True)
+        self.env_list = lmdb.open(path=self.filename_list, map_size=10*1024*1024*1024, map_async=True, writemap=True, readonly=False, lock=False, readahead=False, meminit=False, create=True)
         
         self.bos = vocab[BOS_TOKEN]
         self.eos = vocab[EOS_TOKEN]
@@ -213,20 +236,21 @@ class GloveDataset(Dataset):
                         txn.put(key, pickle.dumps(old_value + 1 / (k + 1)))
 
         # dump to a new database with consequtive index as a key and (w, c, count) as value
-        with self.env.begin(write=False, buffers=True) as txn:
+        print('dumping to a list')
+        with self.env.begin(write=False) as txn:
             with self.env_list.begin(write=True, buffers=True) as txn_list:
-                for i, (k, v) in enumerate(txn.cursor()):
+                for i, (k, v) in tqdm(enumerate(txn.cursor())):
                     k = pickle.loads(k)
                     v = (k[0], k[1], pickle.loads(v))
                     txn_list.put(pickle.dumps(i), pickle.dumps(v))
 
 
     def __len__(self):
-        with self.env.begin(write=False) as txn:
+        with self.env.begin(write=False, buffers=True) as txn:
             return txn.stat()['entries']
 
     def __getitem__(self, i):
-        with self.env_list.begin(write=False) as txn_list:
+        with self.env_list.begin(write=False, buffers=True) as txn_list:
             return pickle.loads(txn_list.get(pickle.dumps(i)))
         
 
@@ -260,63 +284,78 @@ class GloveModel(nn.Module):
         return c_embeds, c_biases
 
 
+def main():
 
-start_time = perf_counter()
-print(f'memory used: {psutil.virtual_memory().percent}%')
-vocab = Vocab.build(load_linesentences(word_separated_txt_path, line_limit_per_document), reserved_tokens=[PAD_TOKEN, BOS_TOKEN, EOS_TOKEN])
-print(f"Length of vocab: {len(vocab)}")
+    start_time = perf_counter()
+    print(f'memory used: {psutil.virtual_memory().percent}%')
+    vocab = Vocab.build(load_linesentences(word_separated_txt_path, line_limit_per_document), reserved_tokens=[PAD_TOKEN, BOS_TOKEN, EOS_TOKEN])
+    print(f"Length of vocab: {len(vocab)}")
 
-end_time = perf_counter()
-m, s = divmod(end_time-start_time, 60)
-print(f'time {m} minutes {s} seconds')
-print(f'memory used: {psutil.virtual_memory().percent}%')
+    end_time = perf_counter()
+    m, s = divmod(end_time-start_time, 60)
+    print(f'time {m} minutes {s} seconds')
+    print(f'memory used: {psutil.virtual_memory().percent}%')
 
-corpus = load_linesentences(word_separated_txt_path, line_limit_per_document)
+    corpus = load_linesentences(word_separated_txt_path, line_limit_per_document)
 
-dataset = GloveDataset(
-    corpus,
-    vocab,
-    context_size=context_size
-)
+    if use_in_memory:
+        dataset = GloveDataset(
+            corpus,
+            vocab,
+            context_size=context_size
+        )
+    else:
+        dataset = GloveDatasetLMDB(
+            corpus,
+            vocab,
+            context_size=context_size
+        )
 
-end_time = perf_counter()
-m, s = divmod(end_time-start_time, 60)
-print(f'time {m} minutes {s} seconds')
-print(f'memory used: {psutil.virtual_memory().percent}%')
+    end_time = perf_counter()
+    m, s = divmod(end_time-start_time, 60)
+    print(f'time {m} minutes {s} seconds')
+    print(f'memory used: {psutil.virtual_memory().percent}%')
 
-data_loader = get_loader(dataset, batch_size)
+    data_loader = get_loader(dataset, batch_size)
 
-device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-model = GloveModel(len(vocab), embedding_dim)
-model.to(device)
-optimizer = optim.Adam(model.parameters(), lr=learning_rate)
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    model = GloveModel(len(vocab), embedding_dim)
+    model.to(device)
+    optimizer = optim.Adam(model.parameters(), lr=learning_rate)
 
-model.train()
-for epoch in range(num_epoch):
-    total_loss = 0
-    for batch in tqdm(data_loader, desc=f"Training Epoch {epoch}"):
-        words, contexts, counts = [x.to(device) for x in batch]
-        # 提取batch内词、上下文的向量表示及偏置
-        word_embeds, word_biases = model.forward_w(words)
-        context_embeds, context_biases = model.forward_c(contexts)
-        # 回归目标值：必要时可以使用log(counts+1)进行平滑
-        log_counts = torch.log(counts)
-        # 样本权重
-        weight_factor = torch.clamp(torch.pow(counts / m_max, alpha), max=1.0)
-        optimizer.zero_grad()
-        # 计算batch内每个样本的L2损失
-        loss = (torch.sum(word_embeds * context_embeds, dim=1, keepdim=True) + word_biases + context_biases - log_counts) ** 2
-        # 样本加权损失
-        wavg_loss = (weight_factor * loss).mean()
-        wavg_loss.backward()
-        optimizer.step()
-        total_loss += wavg_loss.item()
-    print(f"Loss: {total_loss:.2f}")
+    model.train()
+    for epoch in range(num_epoch):
+        total_loss = 0
+        for batch in tqdm(data_loader, desc=f"Training Epoch {epoch}"):
+            words, contexts, counts = [x.to(device) for x in batch]
+            # 提取batch内词、上下文的向量表示及偏置
+            word_embeds, word_biases = model.forward_w(words)
+            context_embeds, context_biases = model.forward_c(contexts)
+            # 回归目标值：必要时可以使用log(counts+1)进行平滑
+            log_counts = torch.log(counts)
+            # 样本权重
+            weight_factor = torch.clamp(torch.pow(counts / m_max, alpha), max=1.0)
+            optimizer.zero_grad()
+            # 计算batch内每个样本的L2损失
+            loss = (torch.sum(word_embeds * context_embeds, dim=1, keepdim=True) + word_biases + context_biases - log_counts) ** 2
+            # 样本加权损失
+            wavg_loss = (weight_factor * loss).mean()
+            wavg_loss.backward()
+            optimizer.step()
+            total_loss += wavg_loss.item()
+        print(f"Loss: {total_loss:.2f}")
 
-# 合并词嵌入矩阵与上下文嵌入矩阵，作为最终的预训练词向量
-combined_embeds = model.w_embeddings.weight + model.c_embeddings.weight
-save_pretrained(vocab, combined_embeds.data, os.path.join(results_path, "glove.vec"))
+    # 合并词嵌入矩阵与上下文嵌入矩阵，作为最终的预训练词向量
+    combined_embeds = model.w_embeddings.weight + model.c_embeddings.weight
+    save_pretrained(vocab, combined_embeds.data, os.path.join(results_path, "glove.vec"))
 
-end_time = perf_counter()
-m, s = divmod(end_time-start_time, 60)
-print(f'time {m} minutes {s} seconds')
+    end_time = perf_counter()
+    m, s = divmod(end_time-start_time, 60)
+    print(f'time {m} minutes {s} seconds')
+
+
+if __name__ == "__main__":
+
+    signal.signal(signal.SIGINT, signal_handler)
+    main()
+    print('done')
