@@ -38,6 +38,7 @@ embedding_dim = 64
 context_size = 8
 batch_size = 128
 num_epoch = 5
+learning_rate = 0.001
 
 word_separated_txt_path = 'data/temp_training_data' # 1% of the data
 results_path = 'data'
@@ -287,7 +288,7 @@ data_loader = get_loader(dataset, batch_size)
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 model = GloveModel(len(vocab), embedding_dim)
 model.to(device)
-optimizer = optim.Adam(model.parameters(), lr=0.001)
+optimizer = optim.Adam(model.parameters(), lr=learning_rate)
 
 model.train()
 for epoch in range(num_epoch):
