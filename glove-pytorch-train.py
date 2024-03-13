@@ -1,7 +1,7 @@
 
-import gensim
-from gensim.models.word2vec import PathLineSentences, LineSentence
-from multiprocessing import Pool
+# import gensim
+from gensim.models.word2vec import PathLineSentences#, LineSentence
+# from multiprocessing import Pool
 from collections import defaultdict
 import torch
 import torch.nn as nn
@@ -10,7 +10,6 @@ import torch.optim as optim
 from torch.utils.data import Dataset, DataLoader
 from torch.nn.utils.rnn import pad_sequence
 from tqdm.auto import tqdm
-
 from collections import defaultdict
 import psutil
 from time import perf_counter
@@ -25,10 +24,9 @@ EOS_TOKEN = "<eos>"
 PAD_TOKEN = "<pad>"
 BOW_TOKEN = "<bow>"
 EOW_TOKEN = "<eow>"
-
 WEIGHT_INIT_RANGE = 0.1
 
-linesentence_reader_process_number = 16
+# linesentence_reader_process_number = 16
 
 # embedding_dim = 64
 # context_size = 2
@@ -52,7 +50,6 @@ alpha = 0.75
 def load_linesentences(txt_path, limit=None):
     for sentence in PathLineSentences(source=txt_path, limit=limit):
         yield sentence
-
 
 # ver2
 # def process_path(path_limit):
@@ -95,8 +92,6 @@ def init_weights(model):
             torch.nn.init.uniform_(
                 param, a=-WEIGHT_INIT_RANGE, b=WEIGHT_INIT_RANGE
             )
-
-
 
 
 class Vocab:
@@ -172,7 +167,6 @@ def read_vocab(path):
 #         self.data = [(w, c, count) for (w, c), count in self.cooccur_counts.items()]
 #         print(f'co-occurence matrix size: {len(self.data)}, memory required: {len(self.data) * 3 * 4 / 1024 / 1024} MB')
 
-
 #     def __len__(self):
 #         return len(self.data)
 
@@ -232,9 +226,6 @@ class GloveDataset(Dataset):
         return (words, contexts, counts)
 
 
-
-
-
 class GloveModel(nn.Module):
     def __init__(self, vocab_size, embedding_dim):
         super(GloveModel, self).__init__()
@@ -257,8 +248,6 @@ class GloveModel(nn.Module):
 
 
 
-
-
 start_time = perf_counter()
 print(f'memory used: {psutil.virtual_memory().percent}%')
 vocab = Vocab.build(load_linesentences(word_separated_txt_path, line_limit_per_document), reserved_tokens=[PAD_TOKEN, BOS_TOKEN, EOS_TOKEN])
@@ -270,7 +259,6 @@ print(f'time {m} minutes {s} seconds')
 print(f'memory used: {psutil.virtual_memory().percent}%')
 
 corpus = load_linesentences(word_separated_txt_path, line_limit_per_document)
-
 
 dataset = GloveDataset(
     corpus,
