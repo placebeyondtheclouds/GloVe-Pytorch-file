@@ -183,7 +183,7 @@ class GloveDataset(Dataset):
                 for k, c in enumerate(right_contexts):
                     self.cooccur_counts[(w, c)] += 1 / (k + 1)
         self.data = [(w, c, count) for (w, c), count in self.cooccur_counts.items()]
-        print(f'co-occurence matrix size: {len(self.data)}, memory required: {len(self.data) * 3 * 4 / 1024 / 1024} MB')
+        print(f'co-occurence matrix size: {len(self.data)}, memory required: {len(self.data)*3*8/1024/1024} MB')
     def __len__(self):
         return len(self.data)
     def __getitem__(self, i):
