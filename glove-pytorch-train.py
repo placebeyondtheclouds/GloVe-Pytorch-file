@@ -13,10 +13,9 @@ from tqdm.auto import tqdm
 from collections import defaultdict
 import psutil
 from time import perf_counter
-import pickle
-import mmap
 import os
-
+import lmdb
+import pickle
 
 # Constants
 BOS_TOKEN = "<bos>"
@@ -35,12 +34,12 @@ WEIGHT_INIT_RANGE = 0.1
 embedding_dim = 64
 context_size = 8
 batch_size = 128
-num_epoch = 5
+num_epoch = 10
 learning_rate = 0.001
 
 word_separated_txt_path = 'data/temp_training_data' # 1% of the data
 results_path = 'data'
-line_limit_per_document = None #for testing. default is None
+line_limit_per_document = 2 #for testing. default is None
 
 # 用以控制样本权重的超参数
 m_max = 100
@@ -145,7 +144,7 @@ def read_vocab(path):
 
 
 
-# in-memory version
+# the original in-memory version
 # class GloveDataset(Dataset):
 #     def __init__(self, corpus, vocab, context_size=2):
 #         # 记录词与上下文在给定语料中的共现次数
@@ -166,13 +165,10 @@ def read_vocab(path):
 #                     self.cooccur_counts[(w, c)] += 1 / (k + 1)
 #         self.data = [(w, c, count) for (w, c), count in self.cooccur_counts.items()]
 #         print(f'co-occurence matrix size: {len(self.data)}, memory required: {len(self.data) * 3 * 4 / 1024 / 1024} MB')
-
 #     def __len__(self):
 #         return len(self.data)
-
 #     def __getitem__(self, i):
 #         return self.data[i]
-
 #     def collate_fn(self, examples):
 #         words = torch.tensor([ex[0] for ex in examples])
 #         contexts = torch.tensor([ex[1] for ex in examples])
@@ -180,50 +176,67 @@ def read_vocab(path):
 #         return (words, contexts, counts)
 
 
-# file version
+
+
+# LMDB version
 class GloveDataset(Dataset):
-    def __init__(self, corpus, vocab, context_size=2):
-        self.cooccur_counts = defaultdict(float)
+    def __init__(self, corpus_generator, vocab, context_size=2):
+        self.filename = os.path.join(results_path, 'cooccur_counts.lmdb')
+        self.filename_list = os.path.join(results_path, 'cooccur_counts_list.lmdb')
+        self.env = lmdb.open(path=self.filename, map_size=1*1024*1024*1024, map_async=True, writemap=True, readonly=False, lock=False, create=True)
+        self.env_list = lmdb.open(path=self.filename_list, map_size=1*1024*1024*1024, map_async=True, writemap=True, readonly=False, lock=False, create=True)
+        
         self.bos = vocab[BOS_TOKEN]
         self.eos = vocab[EOS_TOKEN]
-        self.file_path = os.path.join(results_path, 'cooccur_counts.bin')
-        if os.path.exists(self.file_path):
-            os.remove(self.file_path)
-        self.file = open(self.file_path, 'wb+')
-        for sentence in tqdm(corpus, desc="Dataset Construction (co-occurence matrix)"):
-            sentence = [self.bos] + vocab.convert_tokens_to_ids(sentence) + [self.eos]
-            for i in range(1, len(sentence)-1):
-                w = sentence[i]
-                left_contexts = sentence[max(0, i - context_size):i]
-                right_contexts = sentence[i+1:min(len(sentence), i + context_size)+1]
-                for k, c in enumerate(left_contexts[::-1]):
-                    self.cooccur_counts[(w, c)] += 1 / (k + 1)
-                for k, c in enumerate(right_contexts):
-                    self.cooccur_counts[(w, c)] += 1 / (k + 1)
-            # Write to file after processing each sentence
-            pickle.dump(self.cooccur_counts, self.file, protocol=pickle.HIGHEST_PROTOCOL)
-            self.cooccur_counts.clear()
-        self.file.close()
-        self.data = self.load_data()
-        print(f'co-occurence matrix size: {len(self.data)}, memory required: {len(self.data) * 3 * 4 / 1024 / 1024} MB')
-        
-    def load_data(self):
-        with open(self.file_path, 'rb') as f:
-            mmapped_file = mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ)
-            data = pickle.load(mmapped_file, protocol=pickle.HIGHEST_PROTOCOL)
-        return [(w, c, count) for (w, c), count in data.items()]
+        with self.env.begin(write=True, buffers=True) as txn:
+            for sentence in tqdm(corpus_generator, desc="Dataset Construction"):
+                sentence = [self.bos] + vocab.convert_tokens_to_ids(sentence) + [self.eos]
+                for i in range(1, len(sentence)-1):
+                    w = sentence[i]
+                    left_contexts = sentence[max(0, i - context_size):i]
+                    right_contexts = sentence[i+1:min(len(sentence), i + context_size)+1]
+                    for k, c in enumerate(left_contexts[::-1]):
+                        key = pickle.dumps((w, c))
+                        old_value = txn.get(key)
+                        if old_value is not None:
+                            old_value = pickle.loads(old_value)
+                        else:
+                            old_value = 0
+                        txn.put(key, pickle.dumps(old_value + 1 / (k + 1)))
+                    for k, c in enumerate(right_contexts):
+                        key = pickle.dumps((w, c))
+                        old_value = txn.get(key)
+                        if old_value is not None:
+                            old_value = pickle.loads(old_value)
+                        else:
+                            old_value = 0
+                        txn.put(key, pickle.dumps(old_value + 1 / (k + 1)))
+
+        # dump to a new database with consequtive index as a key and (w, c, count) as value
+        with self.env.begin(write=False, buffers=True) as txn:
+            with self.env_list.begin(write=True, buffers=True) as txn_list:
+                for i, (k, v) in enumerate(txn.cursor()):
+                    k = pickle.loads(k)
+                    v = (k[0], k[1], pickle.loads(v))
+                    txn_list.put(pickle.dumps(i), pickle.dumps(v))
+
 
     def __len__(self):
-        return len(self.data)
+        with self.env.begin(write=False) as txn:
+            return txn.stat()['entries']
 
     def __getitem__(self, i):
-        return self.data[i]
+        with self.env_list.begin(write=False) as txn_list:
+            return pickle.loads(txn_list.get(pickle.dumps(i)))
+        
 
     def collate_fn(self, examples):
         words = torch.tensor([ex[0] for ex in examples])
         contexts = torch.tensor([ex[1] for ex in examples])
         counts = torch.tensor([ex[2] for ex in examples])
         return (words, contexts, counts)
+
+
 
 
 class GloveModel(nn.Module):
