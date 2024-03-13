@@ -43,8 +43,8 @@ learning_rate = 0.001
 
 word_separated_txt_path = 'data/temp_training_data' # 1% of the data
 results_path = 'data'
-line_limit_per_document = 10 #for testing. default is None
-use_in_memory = True
+line_limit_per_document = 10 #for testing. None for no limit
+use_in_memory = True #False for LMDB
 lmdb_map_size = 30*1024*1024*1024 #30GB
 
 # 用以控制样本权重的超参数
