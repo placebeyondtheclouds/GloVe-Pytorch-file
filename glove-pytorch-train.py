@@ -39,13 +39,12 @@ WEIGHT_INIT_RANGE = 0.1
 embedding_dim = 300
 context_size = 8
 batch_size = 512
-num_epoch = 30
+num_epoch = 5
 learning_rate = 0.001
 
 word_separated_txt_path = 'data/temp_training_data' # 1% of the data
 results_path = 'data'
 line_limit_per_document = None #for testing. None for no limit
-
 lmdb_map_size = 30*1024*1024*1024 #30GB
 
 # 用以控制样本权重的超参数
@@ -267,7 +266,6 @@ class GloveDatasetLMDB(Dataset):
 
 
 
-
 class GloveModel(nn.Module):
     def __init__(self, vocab_size, embedding_dim):
         super(GloveModel, self).__init__()
@@ -310,13 +308,7 @@ def main():
             context_size=context_size
         )
 
-
-    # dataset = GloveDatasetLMDB(
-    #         corpus,
-    #         vocab,
-    #         context_size=context_size
-    #     )
-   
+        
 
     end_time = perf_counter()
     m, s = divmod(end_time-start_time, 60)
