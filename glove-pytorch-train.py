@@ -299,6 +299,7 @@ def main():
         print(f"Path do not exist: {word_separated_txt_path} or {results_path}")
         return
 
+    # use generator to save memory
     vocab = Vocab.build(load_linesentences(word_separated_txt_path, line_limit_per_document), reserved_tokens=[PAD_TOKEN, BOS_TOKEN, EOS_TOKEN])
     print(f"Length of vocab: {len(vocab)}")
 
@@ -307,6 +308,7 @@ def main():
     print(f'time {m} minutes {s} seconds')
     print(f'memory used: {psutil.virtual_memory().percent}%')
 
+    # use generator to save memory
     corpus = load_linesentences(word_separated_txt_path, line_limit_per_document)
 
     if inmemory_or_lmdb == 'lmdb':
