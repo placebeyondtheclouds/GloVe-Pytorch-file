@@ -53,10 +53,12 @@ m_max = 100
 alpha = 0.75
 
 
+# to correctly interrupt the execution of the script
 def signal_handler(sig, frame):
     print('You pressed Ctrl+C!')
     sys.exit(0)
 
+# this function is needed to correctly delete data on NFS file system, and correctly handle symlinks
 def remove_contents(directory):
     for filename in tqdm(os.listdir(directory)):
         file_path = os.path.join(directory, filename)
