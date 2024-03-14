@@ -10,6 +10,14 @@ This is a training code, modified to handle large datasets:
 - text data is in gensim PathLineSentences format (a directory with txt/gz files with one sentence per line, tokens separated by spaces)
 - in addition to in-memory, added the option to write co-occurence matrix to disk using LMDB (very slow, needs optimization)
 
+### usage:
+
+edit parameters after the imports block, then
+
+```
+CUDA_DEVICE_ORDER=PCI_BUS_ID CUDA_VISIBLE_DEVICES=0 python glove-pytorch-train.py
+```
+
 ### environment setup:
 
 ```
@@ -25,7 +33,3 @@ conda install conda-forge::tqdm -y
 - add muli-GPU support
 - evaluation code
 - dataset preparation code
-
-```
-
-```
