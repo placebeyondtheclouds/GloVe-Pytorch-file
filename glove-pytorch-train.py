@@ -293,6 +293,12 @@ def main():
 
     start_time = perf_counter()
     print(f'memory used: {psutil.virtual_memory().percent}%')
+
+    # check if paths are there
+    if not os.path.exists(word_separated_txt_path) and not os.path.exists(results_path):
+        print(f"Path do not exist: {word_separated_txt_path} or {results_path}")
+        return
+
     vocab = Vocab.build(load_linesentences(word_separated_txt_path, line_limit_per_document), reserved_tokens=[PAD_TOKEN, BOS_TOKEN, EOS_TOKEN])
     print(f"Length of vocab: {len(vocab)}")
 
