@@ -20,7 +20,7 @@ import shutil
 # import glob
 import signal
 import sys
-import numpy as np
+# import numpy as np
 
 # Constants
 BOS_TOKEN = "<bos>"
