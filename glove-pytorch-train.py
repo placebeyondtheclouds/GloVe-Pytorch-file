@@ -42,6 +42,7 @@ batch_size = 512
 num_epoch = 5
 learning_rate = 0.001
 
+inmemory_or_lmdb = 'inmemory' # store co-occurence matrix in 'lmdb' or 'inmemory'
 word_separated_txt_path = 'data/temp_training_data' # 1% of the data
 results_path = 'data'
 line_limit_per_document = None #for testing. None for no limit
@@ -300,12 +301,18 @@ def main():
 
     corpus = load_linesentences(word_separated_txt_path, line_limit_per_document)
 
-
-    dataset = GloveDataset(
+    if inmemory_or_lmdb == 'lmdb':
+        dataset = GloveDatasetLMDB(
             corpus,
             vocab,
             context_size=context_size
         )
+    else:
+        dataset = GloveDataset(
+                corpus,
+                vocab,
+                context_size=context_size
+            )
 
         
 
