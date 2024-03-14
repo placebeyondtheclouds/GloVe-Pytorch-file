@@ -12,10 +12,16 @@ This is a training code, modified to handle large datasets:
 
 ### usage:
 
-edit parameters after the imports block, then
+edit parameters after the imports block, then for GPU training:
 
 ```
 CUDA_DEVICE_ORDER=PCI_BUS_ID CUDA_VISIBLE_DEVICES=0 python glove-pytorch-train.py
+```
+
+for CPU training:
+
+```
+CUDA_VISIBLE_DEVICES="" python glove-pytorch-train.py
 ```
 
 ### environment setup:
