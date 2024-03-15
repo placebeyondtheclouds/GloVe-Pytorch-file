@@ -1,6 +1,10 @@
 # GloVe-Pytorch-file
 
-### about
+### the hard truth
+
+https://github.com/stanfordnlp/GloVe/tree/master/src is still faster
+
+### about:
 
 The original code is from https://github.com/HIT-SCIR/plm-nlp-code/tree/main/chp5
 

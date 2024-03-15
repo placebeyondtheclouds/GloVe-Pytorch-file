@@ -21,6 +21,7 @@ import shutil
 import signal
 import sys
 # import numpy as np
+import itertools
 
 # Constants
 BOS_TOKEN = "<bos>"
@@ -200,6 +201,7 @@ class GloveDataset(Dataset):
         contexts = torch.tensor([ex[1] for ex in examples])
         counts = torch.tensor([ex[2] for ex in examples])
         return (words, contexts, counts)
+
 
 
 
