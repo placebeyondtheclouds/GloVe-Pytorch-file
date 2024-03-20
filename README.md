@@ -1,5 +1,7 @@
 # GloVe-Pytorch-file
 
+# this is a work in progress!
+
 ### the hard truth
 
 https://github.com/stanfordnlp/GloVe/tree/master/src is still faster
