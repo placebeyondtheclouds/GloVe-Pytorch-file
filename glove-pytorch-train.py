@@ -14,7 +14,7 @@ from collections import defaultdict
 import psutil
 from time import perf_counter
 import os
-import lmdb
+
 import pickle
 import shutil
 # import glob
@@ -43,13 +43,13 @@ batch_size = 256
 num_epoch = 100
 learning_rate = 0.001
 
-inmemory_or_lmdb = 'inmemory' # store co-occurence matrix in 'lmdb' or 'inmemory'
+
 mem_limit_mb = 30*1024 # 30GB
 
 # word_separated_txt_path = 'data/temp_training_data' # 1% of the data
 results_path = 'data'
 line_limit_per_document = None #for testing. None for no limit
-lmdb_map_size = 30*1024*1024*1024 #30GB
+
 
 
 # 用以控制样本权重的超参数
@@ -174,8 +174,6 @@ def read_vocab(path):
 
 
 
-
-# the original in-memory version
 class GloveDataset(Dataset):
     def __init__(self, corpus, vocab, context_size=2):
         # 记录词与上下文在给定语料中的共现次数
@@ -219,70 +217,6 @@ class GloveDataset(Dataset):
         return (words, contexts, counts)
 
 
-
-
-# LMDB version
-class GloveDatasetLMDB(Dataset):
-    def __init__(self, corpus_generator, vocab, context_size=2):
-        self.filename = os.path.join(results_path, 'cooccur_counts_lmdb')
-        self.filename_list = os.path.join(results_path, 'cooccur_counts_list_lmdb')
-        if os.path.exists(self.filename):
-            remove_contents(self.filename)
-        if os.path.exists(self.filename_list):
-            remove_contents(self.filename_list)
-        self.env = lmdb.open(path=self.filename, map_size=lmdb_map_size, map_async=True, writemap=True, readonly=False, lock=False, readahead=False,  meminit=False, create=True)
-        self.env_list = lmdb.open(path=self.filename_list, map_size=lmdb_map_size, map_async=True, writemap=True, readonly=False, lock=False, readahead=False, meminit=False, create=True)
-        
-        self.bos = vocab[BOS_TOKEN]
-        self.eos = vocab[EOS_TOKEN]
-        with self.env.begin(write=True) as txn:
-            for sentence in tqdm(corpus_generator, desc="Dataset Construction"):
-                sentence = [self.bos] + vocab.convert_tokens_to_ids(sentence) + [self.eos]
-                for i in range(1, len(sentence)-1):
-                    w = sentence[i]
-                    left_contexts = sentence[max(0, i - context_size):i]
-                    right_contexts = sentence[i+1:min(len(sentence), i + context_size)+1]
-                    for k, c in enumerate(left_contexts[::-1]):
-                        key = pickle.dumps((w, c))
-                        old_value = txn.get(key)
-                        if old_value is not None:
-                            old_value = pickle.loads(old_value)
-                        else:
-                            old_value = 0
-                        txn.put(key, pickle.dumps(old_value + 1 / (k + 1)))
-                    for k, c in enumerate(right_contexts):
-                        key = pickle.dumps((w, c))
-                        old_value = txn.get(key)
-                        if old_value is not None:
-                            old_value = pickle.loads(old_value)
-                        else:
-                            old_value = 0
-                        txn.put(key, pickle.dumps(old_value + 1 / (k + 1)))
-
-        # dump to a new database with consequtive index as a key and (w, c, count) as value
-        print('dumping to a list')
-        with self.env.begin(write=False) as txn:
-            with self.env_list.begin(write=True) as txn_list:
-                for i, (k, v) in tqdm(enumerate(txn.cursor())):
-                    k = pickle.loads(k)
-                    v = (k[0], k[1], pickle.loads(v))
-                    txn_list.put(pickle.dumps(i), pickle.dumps(v))
-
-
-    def __len__(self):
-        with self.env.begin(write=False) as txn:
-            return txn.stat()['entries']
-
-    def __getitem__(self, i):
-        with self.env_list.begin(write=False) as txn_list:
-            return pickle.loads(txn_list.get(pickle.dumps(i)))
-        
-
-    def collate_fn(self, examples):
-        words = torch.tensor([ex[0] for ex in examples])
-        contexts = torch.tensor([ex[1] for ex in examples])
-        counts = torch.tensor([ex[2] for ex in examples])
-        return (words, contexts, counts)
 
 
 
@@ -329,18 +263,12 @@ def main():
     # use generator to save memory
     corpus = load_linesentences(word_separated_txt_path, line_limit_per_document)
 
-    if inmemory_or_lmdb == 'lmdb':
-        dataset = GloveDatasetLMDB(
+
+    dataset = GloveDataset(
             corpus,
             vocab,
             context_size=context_size
         )
-    else:
-        dataset = GloveDataset(
-                corpus,
-                vocab,
-                context_size=context_size
-            )
 
         
 
