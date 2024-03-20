@@ -21,7 +21,7 @@ This is a training code, modified to handle large datasets:
 edit parameters after the imports block, then for GPU training:
 
 ```
-CUDA_DEVICE_ORDER=PCI_BUS_ID CUDA_VISIBLE_DEVICES=0 python glove-pytorch-train.py
+CUDA_DEVICE_ORDER=PCI_BUS_ID CUDA_VISIBLE_DEVICES=1,2 python glove-pytorch-train.py
 ```
 
 for CPU training:

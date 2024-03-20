@@ -38,16 +38,19 @@ WEIGHT_INIT_RANGE = 0.1
 # batch_size = 1024
 # num_epoch = 10
 embedding_dim = 300
-context_size = 8
-batch_size = 512
-num_epoch = 5
+context_size = 5
+batch_size = 256
+num_epoch = 100
 learning_rate = 0.001
 
 inmemory_or_lmdb = 'inmemory' # store co-occurence matrix in 'lmdb' or 'inmemory'
-word_separated_txt_path = 'data/temp_training_data' # 1% of the data
+mem_limit_mb = 30*1024 # 30GB
+
+# word_separated_txt_path = 'data/temp_training_data' # 1% of the data
 results_path = 'data'
 line_limit_per_document = None #for testing. None for no limit
 lmdb_map_size = 30*1024*1024*1024 #30GB
+
 
 # 用以控制样本权重的超参数
 m_max = 100
@@ -133,12 +136,16 @@ class Vocab:
     @classmethod
     def build(cls, text, min_freq=1, reserved_tokens=None):
         token_freqs = defaultdict(int)
-        for sentence in tqdm(text, desc="Building Vocabulary"):
-            for token in sentence:
-                token_freqs[token] += 1
-        uniq_tokens = ["<unk>"] + (reserved_tokens if reserved_tokens else [])
-        uniq_tokens += [token for token, freq in token_freqs.items() \
-                        if freq >= min_freq and token != "<unk>"]
+        with tqdm(desc="Building Vocab") as pbar:
+            for sentence in text:
+                for token in sentence:
+                    token_freqs[token] += 1
+                pbar.update()
+                if len(token_freqs) % 100 == 0:
+                    pbar.set_description(f"Building Vocab ({len(token_freqs)} tokens), current thread: {psutil.Process().memory_info().rss / 1024 ** 2:.2f} MB")
+            uniq_tokens = ["<unk>"] + (reserved_tokens if reserved_tokens else [])
+            uniq_tokens += [token for token, freq in token_freqs.items() \
+                            if freq >= min_freq and token != "<unk>"]
         return cls(uniq_tokens)
 
     
@@ -175,18 +182,27 @@ class GloveDataset(Dataset):
         self.cooccur_counts = defaultdict(float)
         self.bos = vocab[BOS_TOKEN]
         self.eos = vocab[EOS_TOKEN]
-        for sentence in tqdm(corpus, desc="Dataset Construction"):
-            # sentence = [self.bos] + sentence + [self.eos]
-            sentence = [self.bos] + vocab.convert_tokens_to_ids(sentence) + [self.eos]
-            for i in range(1, len(sentence)-1):
-                w = sentence[i]
-                left_contexts = sentence[max(0, i - context_size):i]
-                right_contexts = sentence[i+1:min(len(sentence), i + context_size)+1]
-                # 共现次数随距离衰减: 1/d(w, c)
-                for k, c in enumerate(left_contexts[::-1]):
-                    self.cooccur_counts[(w, c)] += 1 / (k + 1)
-                for k, c in enumerate(right_contexts):
-                    self.cooccur_counts[(w, c)] += 1 / (k + 1)
+        with tqdm(desc="Dataset Construction") as pbar:
+            for sentence in corpus:
+                # sentence = [self.bos] + sentence + [self.eos]
+                sentence = [self.bos] + vocab.convert_tokens_to_ids(sentence) + [self.eos]
+                for i in range(1, len(sentence)-1):
+                    w = sentence[i]
+                    left_contexts = sentence[max(0, i - context_size):i]
+                    right_contexts = sentence[i+1:min(len(sentence), i + context_size)+1]
+                    # 共现次数随距离衰减: 1/d(w, c)
+                    for k, c in enumerate(left_contexts[::-1]):
+                        self.cooccur_counts[(w, c)] += 1 / (k + 1)
+                    for k, c in enumerate(right_contexts):
+                        self.cooccur_counts[(w, c)] += 1 / (k + 1)
+                pbar.update(1)
+                if len(self.cooccur_counts) % 100 == 0:
+                    current_thread_memory_usage = psutil.Process().memory_info().rss / 1024 ** 2
+                    # kill the program if memory usage is too high
+                    if current_thread_memory_usage > mem_limit_mb:
+                        print(f"Memory usage too high: {current_thread_memory_usage:.2f} MB")
+                        sys.exit(0)
+                    pbar.set_description(f"Dataset Construction ({len(self.cooccur_counts)} co-occurrences), current thread mem: {current_thread_memory_usage:.2f} MB, will die if over {mem_limit_mb} MB")
         self.data = [(w, c, count) for (w, c), count in self.cooccur_counts.items()]
         print(f'co-occurence matrix size: {len(self.data)}, memory required: {len(self.data)*3*8/1024/1024} MB')
     
@@ -294,7 +310,7 @@ class GloveModel(nn.Module):
 def main():
 
     start_time = perf_counter()
-    print(f'memory used: {psutil.virtual_memory().percent}%')
+    print(f'Total system memory used: {psutil.virtual_memory().percent}%')
 
     # check if paths are there
     if not os.path.exists(word_separated_txt_path) and not os.path.exists(results_path):
@@ -308,7 +324,7 @@ def main():
     end_time = perf_counter()
     m, s = divmod(end_time-start_time, 60)
     print(f'time {m} minutes {s} seconds')
-    print(f'memory used: {psutil.virtual_memory().percent}%')
+    print(f'Total system memory used: {psutil.virtual_memory().percent}%')
 
     # use generator to save memory
     corpus = load_linesentences(word_separated_txt_path, line_limit_per_document)
@@ -331,7 +347,7 @@ def main():
     end_time = perf_counter()
     m, s = divmod(end_time-start_time, 60)
     print(f'time {m} minutes {s} seconds')
-    print(f'memory used: {psutil.virtual_memory().percent}%')
+    print(f'Total system memory used: {psutil.virtual_memory().percent}%')
 
     data_loader = get_loader(dataset, batch_size)
 
