@@ -20,8 +20,10 @@ import shutil
 # import glob
 import signal
 import sys
-# import numpy as np
+
 import itertools
+import numpy as np
+
 
 # Constants
 BOS_TOKEN = "<bos>"
@@ -46,7 +48,7 @@ learning_rate = 0.001
 
 mem_limit_mb = 30*1024 # 30GB
 
-# word_separated_txt_path = 'data/temp_training_data' # 1% of the data
+word_separated_txt_path = 'data/temp_training_data' # 1% of the data
 results_path = 'data'
 line_limit_per_document = None #for testing. None for no limit
 
@@ -203,7 +205,9 @@ class GloveDataset(Dataset):
                     pbar.set_description(f"Dataset Construction ({len(self.cooccur_counts)} co-occurrences), current thread mem: {current_thread_memory_usage:.2f} MB, will die if over {mem_limit_mb} MB")
         self.data = [(w, c, count) for (w, c), count in self.cooccur_counts.items()]
         print(f'co-occurence matrix size: {len(self.data)}, memory required: {len(self.data)*3*8/1024/1024} MB')
-    
+
+
+
     def __len__(self):
         return len(self.data)
     
