@@ -23,6 +23,7 @@ import sys
 
 import itertools
 import numpy as np
+import multiprocessing as mp
 
 
 # Constants
@@ -175,37 +176,81 @@ def read_vocab(path):
     return Vocab(tokens)
 
 
+def worker(sentence, vocab, context_size, queue):
+    cooccur_counts = defaultdict(float)
+    bos = vocab[BOS_TOKEN]
+    eos = vocab[EOS_TOKEN]
+    sentence = [bos] + vocab.convert_tokens_to_ids(sentence) + [eos]
+    for i in range(1, len(sentence)-1):
+        w = sentence[i]
+        left_contexts = sentence[max(0, i - context_size):i]
+        right_contexts = sentence[i+1:min(len(sentence), i + context_size)+1]
+        for k, c in enumerate(left_contexts[::-1]):
+            cooccur_counts[(w, c)] += 1 / (k + 1)
+        for k, c in enumerate(right_contexts):
+            cooccur_counts[(w, c)] += 1 / (k + 1)
+    queue.put(cooccur_counts)
+
+
+
+def parallel_cooccur_counts(corpus, vocab, context_size=2):
+    manager = mp.Manager()
+    queue = manager.Queue()
+    pool = mp.Pool(mp.cpu_count())
+    with tqdm(desc="Processing sentences") as pbar:
+        for sentence in corpus:
+            pool.apply_async(worker, args=(sentence, vocab, context_size, queue), callback=lambda _: pbar.update(1))
+    pool.close()
+    pool.join()
+
+    cooccur_counts = defaultdict(float)
+    while not queue.empty():
+        counts = queue.get()
+        for (w, c), count in counts.items():
+            cooccur_counts[(w, c)] += count
+
+    return cooccur_counts
 
 class GloveDataset(Dataset):
+    # def __init__(self, corpus, vocab, context_size=2):
+    #     # 记录词与上下文在给定语料中的共现次数
+    #     self.cooccur_counts = defaultdict(float)
+    #     self.bos = vocab[BOS_TOKEN]
+    #     self.eos = vocab[EOS_TOKEN]
+    #     with tqdm(desc="Dataset Construction") as pbar:
+    #         for sentence in corpus:
+    #             # sentence = [self.bos] + sentence + [self.eos]
+    #             sentence = [self.bos] + vocab.convert_tokens_to_ids(sentence) + [self.eos]
+    #             for i in range(1, len(sentence)-1):
+    #                 w = sentence[i]
+    #                 left_contexts = sentence[max(0, i - context_size):i]
+    #                 right_contexts = sentence[i+1:min(len(sentence), i + context_size)+1]
+    #                 # 共现次数随距离衰减: 1/d(w, c)
+    #                 for k, c in enumerate(left_contexts[::-1]):
+    #                     self.cooccur_counts[(w, c)] += 1 / (k + 1)
+    #                 for k, c in enumerate(right_contexts):
+    #                     self.cooccur_counts[(w, c)] += 1 / (k + 1)
+    #             pbar.update(1)
+    #             if len(self.cooccur_counts) % 100 == 0:
+    #                 current_thread_memory_usage = psutil.Process().memory_info().rss / 1024 ** 2
+    #                 # kill the program if memory usage is too high
+    #                 if current_thread_memory_usage > mem_limit_mb:
+    #                     print(f"Memory usage too high: {current_thread_memory_usage:.2f} MB")
+    #                     sys.exit(0)
+    #                 pbar.set_description(f"Dataset Construction ({len(self.cooccur_counts)} co-occurrences), current thread mem: {current_thread_memory_usage:.2f} MB, will die if over {mem_limit_mb} MB")
+    #     self.data = [(w, c, count) for (w, c), count in self.cooccur_counts.items()]
+    #     print(f'co-occurence matrix size: {len(self.data)}, memory required: {len(self.data)*3*8/1024/1024} MB')
+
+
+    
     def __init__(self, corpus, vocab, context_size=2):
         # 记录词与上下文在给定语料中的共现次数
-        self.cooccur_counts = defaultdict(float)
-        self.bos = vocab[BOS_TOKEN]
-        self.eos = vocab[EOS_TOKEN]
-        with tqdm(desc="Dataset Construction") as pbar:
-            for sentence in corpus:
-                # sentence = [self.bos] + sentence + [self.eos]
-                sentence = [self.bos] + vocab.convert_tokens_to_ids(sentence) + [self.eos]
-                for i in range(1, len(sentence)-1):
-                    w = sentence[i]
-                    left_contexts = sentence[max(0, i - context_size):i]
-                    right_contexts = sentence[i+1:min(len(sentence), i + context_size)+1]
-                    # 共现次数随距离衰减: 1/d(w, c)
-                    for k, c in enumerate(left_contexts[::-1]):
-                        self.cooccur_counts[(w, c)] += 1 / (k + 1)
-                    for k, c in enumerate(right_contexts):
-                        self.cooccur_counts[(w, c)] += 1 / (k + 1)
-                pbar.update(1)
-                if len(self.cooccur_counts) % 100 == 0:
-                    current_thread_memory_usage = psutil.Process().memory_info().rss / 1024 ** 2
-                    # kill the program if memory usage is too high
-                    if current_thread_memory_usage > mem_limit_mb:
-                        print(f"Memory usage too high: {current_thread_memory_usage:.2f} MB")
-                        sys.exit(0)
-                    pbar.set_description(f"Dataset Construction ({len(self.cooccur_counts)} co-occurrences), current thread mem: {current_thread_memory_usage:.2f} MB, will die if over {mem_limit_mb} MB")
-        self.data = [(w, c, count) for (w, c), count in self.cooccur_counts.items()]
-        print(f'co-occurence matrix size: {len(self.data)}, memory required: {len(self.data)*3*8/1024/1024} MB')
 
+  
+        cooccur_counts = parallel_cooccur_counts(corpus, vocab)
+
+        self.data = [(w, c, count) for (w, c), count in cooccur_counts.items()]
+        print(f'co-occurence matrix size: {len(self.data)}, memory required: {len(self.data)*3*8/1024/1024} MB')
 
 
     def __len__(self):

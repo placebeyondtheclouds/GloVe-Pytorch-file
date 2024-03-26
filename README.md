@@ -41,6 +41,7 @@ conda install conda-forge::tqdm -y
 
 ### to do:
 
+- the code for generation of the co-occurrence matrix is very slow, needs to be optimized
 - add muli-GPU support
 - evaluation code
 - dataset preparation code
